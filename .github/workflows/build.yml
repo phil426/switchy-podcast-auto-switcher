@@ -12,6 +12,9 @@ env:
   OBS_VERSION: "30.2.2"
   QT_VERSION: "6.7.2"
 
+permissions:
+  contents: write
+
 jobs:
   # ── Apple Silicon (arm64) ─────────────────────────────────────────────────
   build-arm64:
