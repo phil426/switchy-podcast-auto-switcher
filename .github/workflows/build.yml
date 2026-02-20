@@ -1,0 +1,152 @@
+name: Build Switchy Plugin
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  release:
+    types: [published]
+
+env:
+  PLUGIN_NAME: obs-auto-cam-switcher
+  OBS_VERSION: "30.2.2"
+
+jobs:
+  # ── macOS ─────────────────────────────────────────────────────────────────
+  build-macos:
+    name: macOS Build
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install OBS Studio (Homebrew)
+        run: |
+          brew install obs-studio cmake ninja
+
+      - name: Configure
+        run: |
+          cmake -B build -S . \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Package
+        run: |
+          mkdir -p dist/macos
+          cp -r build/*.dylib dist/macos/ 2>/dev/null || true
+          cp -r data dist/macos/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: switchy-macos
+          path: dist/macos
+
+  # ── Windows ───────────────────────────────────────────────────────────────
+  build-windows:
+    name: Windows Build
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup OBS Studio build environment
+        uses: obsproject/obs-studio/.github/actions/setup-obs@master
+        with:
+          obs-version: ${{ env.OBS_VERSION }}
+        continue-on-error: true
+
+      - name: Install OBS deps (fallback via vcpkg)
+        if: failure()
+        run: |
+          choco install cmake ninja -y
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -B build -S . `
+            -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist\windows
+          Copy-Item build\Release\*.dll dist\windows\ -ErrorAction SilentlyContinue
+          Copy-Item data dist\windows\ -Recurse
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: switchy-windows
+          path: dist/windows
+
+  # ── Linux (Ubuntu) ────────────────────────────────────────────────────────
+  build-linux:
+    name: Linux Build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build \
+            libobs-dev obs-studio \
+            qtbase5-dev qt6-base-dev 2>/dev/null || \
+          sudo apt-get install -y cmake ninja-build \
+            libobs-dev obs-studio qtbase5-dev
+
+      - name: Configure
+        run: |
+          cmake -B build -S . \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Package
+        run: |
+          mkdir -p dist/linux
+          cp build/*.so dist/linux/ 2>/dev/null || true
+          cp -r data dist/linux/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: switchy-linux
+          path: dist/linux
+
+  # ── Release: bundle all artifacts ─────────────────────────────────────────
+  release:
+    name: Attach to Release
+    runs-on: ubuntu-latest
+    needs: [build-macos, build-windows, build-linux]
+    if: github.event_name == 'release'
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Zip per platform
+        run: |
+          cd artifacts
+          for dir in */; do
+            zip -r "../${dir%/}.zip" "$dir"
+          done
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "*.zip"
