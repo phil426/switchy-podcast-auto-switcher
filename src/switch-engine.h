@@ -1,0 +1,57 @@
+#pragma once
+#include <string>
+#include <vector>
+#include <chrono>
+#include <mutex>
+#include <functional>
+#include <cfloat>
+#include "utils.h"
+
+enum class Priority { Low = 0, Medium = 1, High = 2 };
+inline float priority_bias_db(Priority p) {
+    if (p == Priority::Low)  return -6.0f;
+    if (p == Priority::High) return +6.0f;
+    return 0.0f;
+}
+
+enum class Responsiveness { Relaxed = 0, Neutral = 1, Fast = 2 };
+inline float responsiveness_alpha(Responsiveness r) {
+    if (r == Responsiveness::Relaxed) return 0.05f;
+    if (r == Responsiveness::Fast)    return 0.40f;
+    return 0.15f;
+}
+
+struct CamMapping {
+    std::string audio_source;
+    std::string scene_name;
+    Priority    priority        = Priority::Medium;
+    float       threshold_dbfs  = -40.0f;
+    EMA         ema;
+};
+
+using SwitchCallback = std::function<void(const std::string &scene_name)>;
+
+class SwitchEngine {
+public:
+    SwitchEngine();
+    void set_mappings(std::vector<CamMapping> mappings);
+    void set_responsiveness(Responsiveness r);
+    void set_hold_time_ms(int ms);
+    void set_fallback_scene(const std::string &scene_name);
+    void set_switch_callback(SwitchCallback cb);
+    void on_audio_level(const std::string &source_name, float dbfs);
+    void set_enabled(bool enabled);
+    bool is_enabled() const { return enabled_; }
+    std::vector<std::pair<std::string, float>> get_levels() const;
+private:
+    void try_switch();
+    mutable std::mutex mutex_;
+    std::vector<CamMapping> mappings_;
+    Responsiveness responsiveness_ = Responsiveness::Neutral;
+    int hold_time_ms_ = 800;
+    std::string fallback_scene_;
+    SwitchCallback switch_cb_;
+    bool enabled_ = false;
+    std::string current_scene_;
+    std::chrono::steady_clock::time_point last_switch_time_;
+};

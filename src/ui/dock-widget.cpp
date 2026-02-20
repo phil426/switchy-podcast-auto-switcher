@@ -1,0 +1,63 @@
+#include "dock-widget.h"
+#include "../switch-engine.h"
+#include <QHBoxLayout>
+#include <QFrame>
+#include <algorithm>
+
+AutoCamDock::AutoCamDock(SwitchEngine *engine,QWidget *parent)
+    :QDockWidget("Switchy",parent),engine_(engine){
+    setObjectName("SwitchyDock"); build_ui();
+    update_timer_=new QTimer(this);
+    connect(update_timer_,&QTimer::timeout,this,&AutoCamDock::update_vu_meters);
+    update_timer_->start(50);
+}
+void AutoCamDock::build_ui(){
+    auto *root=new QWidget(this); setWidget(root);
+    auto *vbox=new QVBoxLayout(root); vbox->setSpacing(6); vbox->setContentsMargins(8,8,8,8);
+    toggle_btn_=new QPushButton(root); toggle_btn_->setCheckable(true);
+    set_toggle_appearance(false);
+    connect(toggle_btn_,&QPushButton::clicked,this,&AutoCamDock::on_toggle_clicked);
+    vbox->addWidget(toggle_btn_);
+    auto *line=new QFrame(root); line->setFrameShape(QFrame::HLine); line->setFrameShadow(QFrame::Sunken); vbox->addWidget(line);
+    vu_container_=new QWidget(root); vu_layout_=new QVBoxLayout(vu_container_);
+    vu_layout_->setSpacing(4); vu_layout_->setContentsMargins(0,0,0,0); vbox->addWidget(vu_container_);
+    auto *resp_row=new QHBoxLayout(); resp_row->addWidget(new QLabel("Responsiveness:",root));
+    responsiveness_combo_=new QComboBox(root);
+    responsiveness_combo_->addItem("Relaxed",(int)Responsiveness::Relaxed);
+    responsiveness_combo_->addItem("Neutral",(int)Responsiveness::Neutral);
+    responsiveness_combo_->addItem("Fast",(int)Responsiveness::Fast);
+    responsiveness_combo_->setCurrentIndex(1);
+    connect(responsiveness_combo_,QOverload<int>::of(&QComboBox::currentIndexChanged),[this](int idx){
+        engine_->set_responsiveness((Responsiveness)responsiveness_combo_->itemData(idx).toInt());
+    });
+    resp_row->addWidget(responsiveness_combo_); vbox->addLayout(resp_row);
+    settings_btn_=new QPushButton("⚙ Open Settings",root);
+    connect(settings_btn_,&QPushButton::clicked,this,&AutoCamDock::on_settings_clicked);
+    vbox->addWidget(settings_btn_); vbox->addStretch();
+}
+void AutoCamDock::set_toggle_appearance(bool enabled){
+    toggle_btn_->setChecked(enabled);
+    if(enabled){ toggle_btn_->setText("● Switchy: ON"); toggle_btn_->setStyleSheet("QPushButton{background:#2a6e32;color:white;font-weight:bold;padding:6px;border-radius:4px;}"); }
+    else{ toggle_btn_->setText("○ Switchy: OFF"); toggle_btn_->setStyleSheet("QPushButton{background:#444;color:#aaa;font-weight:bold;padding:6px;border-radius:4px;}"); }
+}
+void AutoCamDock::on_toggle_clicked(){ bool n=!engine_->is_enabled(); engine_->set_enabled(n); set_toggle_appearance(n); emit enabled_changed(n); }
+void AutoCamDock::on_settings_clicked(){ emit open_settings_requested(); }
+void AutoCamDock::refresh_mappings(const std::vector<std::pair<std::string,std::string>> &mappings){
+    for(auto &r:vu_rows_){delete r.label;delete r.bar;} vu_rows_.clear();
+    for(const auto &[src,scene]:mappings){
+        auto *rw=new QWidget(vu_container_); auto *hbox=new QHBoxLayout(rw); hbox->setContentsMargins(0,0,0,0);
+        auto *label=new QLabel(QString::fromStdString(src)+" → "+QString::fromStdString(scene),rw);
+        label->setFixedWidth(160); label->setToolTip(label->text());
+        auto *bar=new QProgressBar(rw); bar->setRange(0,100); bar->setValue(0); bar->setTextVisible(false); bar->setFixedHeight(10);
+        bar->setStyleSheet("QProgressBar{border:1px solid #555;border-radius:2px;background:#222;}"
+                           "QProgressBar::chunk{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #2ecc71,stop:0.7 #f39c12,stop:1.0 #e74c3c);}");
+        hbox->addWidget(label); hbox->addWidget(bar,1); vu_layout_->addWidget(rw); vu_rows_.push_back({label,bar});
+    }
+}
+void AutoCamDock::update_vu_meters(){
+    auto levels=engine_->get_levels();
+    for(size_t i=0;i<levels.size()&&i<vu_rows_.size();++i){
+        int pct=(int)((std::clamp(levels[i].second,-60.0f,0.0f)+60.0f)*(100.0f/60.0f));
+        vu_rows_[i].bar->setValue(pct);
+    }
+}
