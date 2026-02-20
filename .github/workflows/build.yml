@@ -9,52 +9,59 @@ on:
     types: [published]
 
 env:
-  PLUGIN_NAME: obs-auto-cam-switcher
   OBS_VERSION: "30.2.2"
+  OBS_REPO: "https://github.com/obsproject/obs-studio.git"
 
 jobs:
+  # ── Shared setup step (OBS shallow clone) is inlined per job ──────────────
 
-  # ── macOS Apple Silicon (arm64) ────────────────────────────────────────────
+  # ── macOS Apple Silicon (arm64) ───────────────────────────────────────────
   build-macos-arm64:
     name: macOS Apple Silicon (arm64)
-    runs-on: macos-14          # macos-14 runners are M1 (arm64) natively
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: |
-          brew install obs-studio cmake ninja
-          brew install --cask packages          # for .pkg creation
+      - name: Install build tools
+        run: brew install cmake ninja
 
-      - name: Configure (arm64)
+      - name: Shallow-clone OBS (headers only)
+        run: |
+          git clone --depth 1 --branch ${{ env.OBS_VERSION }} \
+            ${{ env.OBS_REPO }} /tmp/obs-studio || \
+          git clone --depth 1 ${{ env.OBS_REPO }} /tmp/obs-studio
+
+      - name: Install Qt6
+        run: brew install qt@6
+        
+      - name: Configure
         run: |
           cmake -B build -S . \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
+            -DOBS_SOURCE_DIR=/tmp/obs-studio \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6)"
 
       - name: Build
-        run: cmake --build build --config Release
+        run: cmake --build build
 
-      - name: Stage plugin files
+      - name: Stage & create .pkg
         run: |
-          STAGE=stage/Library/Application\ Support/obs-studio/plugins/obs-auto-cam-switcher
-          mkdir -p "$STAGE/bin" "$STAGE/data"
-          find build -name "*.dylib" -exec cp {} "$STAGE/bin/" \;
-          cp -r data/. "$STAGE/data/"
-
-      - name: Create .pkg installer
-        run: |
+          STAGE="${{ runner.temp }}/stage"
+          PLUGIN_DIR="$STAGE/Library/Application Support/obs-studio/plugins/obs-auto-cam-switcher"
+          mkdir -p "$PLUGIN_DIR/bin" "$PLUGIN_DIR/data"
+          find build -name "*.dylib" -exec cp {} "$PLUGIN_DIR/bin/" \;
+          cp -r data/. "$PLUGIN_DIR/data/"
           pkgbuild \
-            --root stage \
+            --root "$STAGE" \
             --identifier com.switchy.obs-auto-cam-switcher \
             --version 1.0.0 \
             --install-location / \
             Switchy-1.0.0-macos-arm64.pkg
 
-      - name: Upload .pkg artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: Switchy-macos-arm64
           path: Switchy-1.0.0-macos-arm64.pkg
@@ -62,158 +69,171 @@ jobs:
   # ── macOS Intel (x86_64) ──────────────────────────────────────────────────
   build-macos-x86_64:
     name: macOS Intel (x86_64)
-    runs-on: macos-13          # macos-13 runners are Intel
+    runs-on: macos-13
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: brew install obs-studio cmake ninja
+      - name: Install build tools & Qt6
+        run: brew install cmake ninja qt@6
 
-      - name: Configure (x86_64)
+      - name: Shallow-clone OBS (headers only)
+        run: |
+          git clone --depth 1 --branch ${{ env.OBS_VERSION }} \
+            ${{ env.OBS_REPO }} /tmp/obs-studio || \
+          git clone --depth 1 ${{ env.OBS_REPO }} /tmp/obs-studio
+
+      - name: Configure
         run: |
           cmake -B build -S . \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_OSX_ARCHITECTURES=x86_64 \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
+            -DOBS_SOURCE_DIR=/tmp/obs-studio \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6)"
 
       - name: Build
         run: cmake --build build
 
-      - name: Stage & package
+      - name: Stage & .pkg
         run: |
-          STAGE=stage/Library/Application\ Support/obs-studio/plugins/obs-auto-cam-switcher
-          mkdir -p "$STAGE/bin" "$STAGE/data"
-          find build -name "*.dylib" -exec cp {} "$STAGE/bin/" \;
-          cp -r data/. "$STAGE/data/"
-          pkgbuild \
-            --root stage \
-            --identifier com.switchy.obs-auto-cam-switcher \
-            --version 1.0.0 \
-            --install-location / \
-            Switchy-1.0.0-macos-x86_64.pkg
+          STAGE="${{ runner.temp }}/stage"
+          PLUGIN_DIR="$STAGE/Library/Application Support/obs-studio/plugins/obs-auto-cam-switcher"
+          mkdir -p "$PLUGIN_DIR/bin" "$PLUGIN_DIR/data"
+          find build -name "*.dylib" -exec cp {} "$PLUGIN_DIR/bin/" \;
+          cp -r data/. "$PLUGIN_DIR/data/"
+          pkgbuild --root "$STAGE" --identifier com.switchy.obs-auto-cam-switcher \
+            --version 1.0.0 --install-location / Switchy-1.0.0-macos-x86_64.pkg
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: Switchy-macos-x86_64
           path: Switchy-1.0.0-macos-x86_64.pkg
 
-  # ── macOS Universal Binary (arm64 + x86_64) ───────────────────────────────
+  # ── macOS Universal (arm64 + x86_64 lipo) ─────────────────────────────────
   build-macos-universal:
-    name: macOS Universal (arm64 + x86_64)
+    name: macOS Universal Binary
     runs-on: macos-14
-    needs: [build-macos-arm64, build-macos-x86_64]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: brew install obs-studio cmake ninja
+      - name: Install build tools & Qt6
+        run: brew install cmake ninja qt@6
+
+      - name: Shallow-clone OBS
+        run: |
+          git clone --depth 1 --branch ${{ env.OBS_VERSION }} \
+            ${{ env.OBS_REPO }} /tmp/obs-studio || \
+          git clone --depth 1 ${{ env.OBS_REPO }} /tmp/obs-studio
 
       - name: Build arm64 slice
         run: |
           cmake -B build_arm64 -S . -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+            -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
+            -DOBS_SOURCE_DIR=/tmp/obs-studio \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6)"
           cmake --build build_arm64
 
       - name: Build x86_64 slice
         run: |
           cmake -B build_x64 -S . -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+            -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
+            -DOBS_SOURCE_DIR=/tmp/obs-studio \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6)"
           cmake --build build_x64
 
-      - name: Create Universal binary with lipo
+      - name: Combine with lipo
         run: |
-          ARM_LIB=$(find build_arm64 -name "*.dylib" | head -1)
-          X64_LIB=$(find build_x64  -name "*.dylib" | head -1)
           mkdir -p universal
-          lipo -create "$ARM_LIB" "$X64_LIB" -output universal/obs-auto-cam-switcher.dylib
+          ARM=$(find build_arm64 -name "*.dylib" | head -1)
+          X64=$(find build_x64  -name "*.dylib" | head -1)
+          lipo -create "$ARM" "$X64" -output universal/obs-auto-cam-switcher.dylib
           lipo -info universal/obs-auto-cam-switcher.dylib
 
-      - name: Stage & create Universal .pkg
+      - name: Stage & .pkg
         run: |
-          STAGE=stage/Library/Application\ Support/obs-studio/plugins/obs-auto-cam-switcher
-          mkdir -p "$STAGE/bin" "$STAGE/data"
-          cp universal/obs-auto-cam-switcher.dylib "$STAGE/bin/"
-          cp -r data/. "$STAGE/data/"
-          pkgbuild \
-            --root stage \
-            --identifier com.switchy.obs-auto-cam-switcher \
-            --version 1.0.0 \
-            --install-location / \
-            Switchy-1.0.0-macos-universal.pkg
+          STAGE="${{ runner.temp }}/stage"
+          PLUGIN_DIR="$STAGE/Library/Application Support/obs-studio/plugins/obs-auto-cam-switcher"
+          mkdir -p "$PLUGIN_DIR/bin" "$PLUGIN_DIR/data"
+          cp universal/obs-auto-cam-switcher.dylib "$PLUGIN_DIR/bin/"
+          cp -r data/. "$PLUGIN_DIR/data/"
+          pkgbuild --root "$STAGE" --identifier com.switchy.obs-auto-cam-switcher \
+            --version 1.0.0 --install-location / Switchy-1.0.0-macos-universal.pkg
 
-      - name: Upload Universal .pkg
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: Switchy-macos-universal
           path: Switchy-1.0.0-macos-universal.pkg
 
-  # ── Windows x64 (64-bit) ──────────────────────────────────────────────────
+  # ── Windows x64 ───────────────────────────────────────────────────────────
   build-windows-x64:
     name: Windows x64
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install NSIS (for .exe installer)
-        run: choco install nsis -y
+      - name: Install tools
+        run: |
+          choco install nsis cmake ninja -y --no-progress
+          choco install qt6-base-dev --no-progress -y || true
+
+      - name: Shallow-clone OBS (headers)
+        shell: bash
+        run: |
+          git clone --depth 1 --branch ${{ env.OBS_VERSION }} \
+            ${{ env.OBS_REPO }} C:/obs-studio || \
+          git clone --depth 1 ${{ env.OBS_REPO }} C:/obs-studio
+
+      - name: Install Qt6 via aqtinstall
+        run: |
+          pip install aqtinstall
+          aqt install-qt windows desktop 6.6.3 win64_msvc2019_64 -O C:/Qt
 
       - name: Configure (x64)
+        shell: pwsh
         run: |
-          cmake -B build -S . -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release
+          $qt = Get-ChildItem "C:\Qt" -Filter "msvc2019_64" -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          cmake -B build -S . `
+            -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DOBS_SOURCE_DIR="C:/obs-studio" `
+            -DCMAKE_PREFIX_PATH="$qt"
 
       - name: Build
         run: cmake --build build --config Release
 
-      - name: Stage plugin files
+      - name: Stage files
         shell: pwsh
         run: |
-          $stage = "stage\obs-auto-cam-switcher"
-          New-Item -ItemType Directory -Force "$stage\bin\64bit"
-          New-Item -ItemType Directory -Force "$stage\data"
-          Copy-Item build\Release\*.dll "$stage\bin\64bit\" -ErrorAction SilentlyContinue
-          Copy-Item data\* "$stage\data\" -Recurse -ErrorAction SilentlyContinue
+          $s = "stage\obs-auto-cam-switcher"
+          New-Item -Force -ItemType Directory "$s\bin\64bit", "$s\data"
+          Copy-Item build\Release\*.dll "$s\bin\64bit\" -ErrorAction SilentlyContinue
+          Copy-Item data\* "$s\data\" -Recurse -Force -ErrorAction SilentlyContinue
 
       - name: Create NSIS installer
         shell: pwsh
         run: |
-          $nsiScript = @"
-          !define PRODUCT_NAME "Switchy"
-          !define PRODUCT_VERSION "1.0.0"
-          !define PLUGIN_DIR "\$APPDATA\obs-studio\plugins\obs-auto-cam-switcher"
-
-          Name "Switchy v`${PRODUCT_VERSION}"
+          @"
+          !define NAME "Switchy"
+          !define VER  "1.0.0"
+          Name "`${NAME} v`${VER}"
           OutFile "Switchy-1.0.0-windows-x64-installer.exe"
-          InstallDir "C:\Program Files\obs-studio"
           RequestExecutionLevel admin
           ShowInstDetails show
-
-          Section "Plugin"
+          Section
             SetOutPath "`$APPDATA\obs-studio\plugins\obs-auto-cam-switcher\bin\64bit"
             File /r "stage\obs-auto-cam-switcher\bin\64bit\*.*"
             SetOutPath "`$APPDATA\obs-studio\plugins\obs-auto-cam-switcher\data"
             File /r "stage\obs-auto-cam-switcher\data\*.*"
           SectionEnd
-
-          Section "Uninstall"
-            RMDir /r "`$APPDATA\obs-studio\plugins\obs-auto-cam-switcher"
-          SectionEnd
-          "@
-          $nsiScript | Out-File -Encoding ASCII installer.nsi
+          "@ | Out-File -Encoding ASCII installer.nsi
           & "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
 
-      - name: Upload .exe installer
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: Switchy-windows-x64
-          path: Switchy-1.0.0-windows-x64-installer.exe
-
-      - name: Upload .zip (portable)
-        uses: actions/upload-artifact@v4
-        with:
-          name: Switchy-windows-x64-portable
-          path: stage/
+          path: |
+            Switchy-1.0.0-windows-x64-installer.exe
 
   # ── Windows x86 (32-bit) ──────────────────────────────────────────────────
   build-windows-x86:
@@ -222,53 +242,55 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install NSIS
-        run: choco install nsis -y
+      - name: Install tools
+        run: choco install nsis cmake ninja -y --no-progress
+
+      - name: Shallow-clone OBS (headers)
+        shell: bash
+        run: |
+          git clone --depth 1 --branch ${{ env.OBS_VERSION }} \
+            ${{ env.OBS_REPO }} C:/obs-studio || \
+          git clone --depth 1 ${{ env.OBS_REPO }} C:/obs-studio
+
+      - name: Install Qt6 (x86) via aqtinstall
+        run: |
+          pip install aqtinstall
+          aqt install-qt windows desktop 6.6.3 win32_msvc2019 -O C:/Qt
 
       - name: Configure (Win32)
+        shell: pwsh
         run: |
-          cmake -B build -S . -G "Visual Studio 17 2022" -A Win32 -DCMAKE_BUILD_TYPE=Release
+          $qt = Get-ChildItem "C:\Qt" -Filter "msvc2019" -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          cmake -B build -S . `
+            -G "Visual Studio 17 2022" -A Win32 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DOBS_SOURCE_DIR="C:/obs-studio" `
+            -DCMAKE_PREFIX_PATH="$qt"
 
       - name: Build
         run: cmake --build build --config Release
 
-      - name: Stage plugin files
+      - name: Stage & NSIS
         shell: pwsh
         run: |
-          $stage = "stage\obs-auto-cam-switcher"
-          New-Item -ItemType Directory -Force "$stage\bin\32bit"
-          New-Item -ItemType Directory -Force "$stage\data"
-          Copy-Item build\Release\*.dll "$stage\bin\32bit\" -ErrorAction SilentlyContinue
-          Copy-Item data\* "$stage\data\" -Recurse -ErrorAction SilentlyContinue
-
-      - name: Create NSIS installer (x86)
-        shell: pwsh
-        run: |
-          $nsiScript = @"
-          !define PRODUCT_NAME "Switchy"
-          !define PRODUCT_VERSION "1.0.0"
-
-          Name "Switchy v`${PRODUCT_VERSION} (32-bit)"
+          $s = "stage\obs-auto-cam-switcher"
+          New-Item -Force -ItemType Directory "$s\bin\32bit", "$s\data"
+          Copy-Item build\Release\*.dll "$s\bin\32bit\" -ErrorAction SilentlyContinue
+          Copy-Item data\* "$s\data\" -Recurse -Force -ErrorAction SilentlyContinue
+          @"
+          Name "Switchy v1.0.0 (32-bit)"
           OutFile "Switchy-1.0.0-windows-x86-installer.exe"
           RequestExecutionLevel admin
-          ShowInstDetails show
-
-          Section "Plugin"
+          Section
             SetOutPath "`$APPDATA\obs-studio\plugins\obs-auto-cam-switcher\bin\32bit"
             File /r "stage\obs-auto-cam-switcher\bin\32bit\*.*"
             SetOutPath "`$APPDATA\obs-studio\plugins\obs-auto-cam-switcher\data"
             File /r "stage\obs-auto-cam-switcher\data\*.*"
           SectionEnd
-
-          Section "Uninstall"
-            RMDir /r "`$APPDATA\obs-studio\plugins\obs-auto-cam-switcher"
-          SectionEnd
-          "@
-          $nsiScript | Out-File -Encoding ASCII installer.nsi
+          "@ | Out-File -Encoding ASCII installer.nsi
           & "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
 
-      - name: Upload .exe installer (x86)
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: Switchy-windows-x86
           path: Switchy-1.0.0-windows-x86-installer.exe
@@ -280,35 +302,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Add OBS PPA & install libobs-dev
         run: |
+          sudo add-apt-repository -y ppa:obsproject/obs-studio
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build libobs-dev obs-studio qtbase5-dev || \
-          sudo apt-get install -y cmake ninja-build libobs-dev obs-studio qt6-base-dev
+          sudo apt-get install -y cmake ninja-build libobs-dev qtbase5-dev
 
       - name: Configure
-        run: cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: |
+          cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: cmake --build build
 
       - name: Package (.tar.gz)
         run: |
-          STAGE=stage/obs-auto-cam-switcher
+          STAGE="${{ runner.temp }}/stage/obs-auto-cam-switcher"
           mkdir -p "$STAGE/bin" "$STAGE/data"
           find build -name "*.so" -exec cp {} "$STAGE/bin/" \;
           cp -r data/. "$STAGE/data/"
-          tar -czvf Switchy-1.0.0-linux-x86_64.tar.gz -C stage obs-auto-cam-switcher
+          tar -czvf Switchy-1.0.0-linux-x86_64.tar.gz \
+            -C "${{ runner.temp }}/stage" obs-auto-cam-switcher
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: Switchy-linux-x86_64
           path: Switchy-1.0.0-linux-x86_64.tar.gz
 
-  # ── Release: attach all installers ────────────────────────────────────────
+  # ── Attach all installers to GitHub Release ────────────────────────────────
   release-artifacts:
-    name: Attach installers to GitHub Release
+    name: Attach to GitHub Release
     runs-on: ubuntu-latest
     needs:
       - build-macos-universal
@@ -319,17 +342,15 @@ jobs:
       - build-linux
     if: github.event_name == 'release'
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: installers
           merge-multiple: true
 
-      - name: List what we have
+      - name: List artifacts
         run: find installers -type f | sort
 
-      - name: Upload all installers to GitHub Release
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v2
         with:
           files: |
             installers/*.pkg
