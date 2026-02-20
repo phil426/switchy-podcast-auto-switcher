@@ -5,47 +5,32 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ---------------------------------------------------------------------------
 # OBS Studio
-#   Option A (system install): find_package(libobs) — default
-#   Option B (CI / source):    -DOBS_SOURCE_DIR=<path>  -DOBS_BUILD_DIR=<path>
-#     OBS_BUILD_DIR is needed for obs-config.h, which cmake generates during
-#     OBS's own configure step (it is NOT present in the source tree).
+#   Option A (system install, e.g. installed via OBS PPA on Linux):
+#       find_package(libobs) works automatically.
+#   Option B (CI / source only):
+#       -DOBS_SOURCE_DIR=/path/to/obs-studio
+#       We include our bundled src/obs-config.h stub so no OBS cmake build needed.
 # ---------------------------------------------------------------------------
 set(OBS_SOURCE_DIR "" CACHE PATH "obs-studio source tree")
-set(OBS_BUILD_DIR  "" CACHE PATH "obs-studio cmake build dir (for obs-config.h)")
 
 if(OBS_SOURCE_DIR)
-  message(STATUS "[switchy] OBS source : ${OBS_SOURCE_DIR}")
-  message(STATUS "[switchy] OBS build  : ${OBS_BUILD_DIR}")
+  message(STATUS "[switchy] Building against OBS source headers: ${OBS_SOURCE_DIR}")
 
-  # --- libobs ---
   add_library(OBS::libobs INTERFACE IMPORTED)
   target_include_directories(OBS::libobs INTERFACE
-    "${OBS_SOURCE_DIR}/libobs"
-    "${OBS_SOURCE_DIR}"
+    "${OBS_SOURCE_DIR}/libobs"   # obs.h, obs-module.h, obs-data.h, blog.h …
+    "${OBS_SOURCE_DIR}"          # fallback root
+    "${CMAKE_SOURCE_DIR}/src"    # our bundled obs-config.h stub lives here
   )
 
-  # Locate obs-config.h in the build tree (cmake may place it in different
-  # subdirs depending on version: config/, cmake/, or root)
-  if(OBS_BUILD_DIR)
-    file(GLOB_RECURSE _OBS_CONFIG_H "${OBS_BUILD_DIR}/obs-config.h"
-                                     "${OBS_BUILD_DIR}/**/obs-config.h")
-    if(_OBS_CONFIG_H)
-      list(GET _OBS_CONFIG_H 0 _FIRST)
-      get_filename_component(_CFG_DIR "${_FIRST}" DIRECTORY)
-      message(STATUS "[switchy] obs-config.h : ${_FIRST}")
-      target_include_directories(OBS::libobs INTERFACE "${_CFG_DIR}")
-    else()
-      message(WARNING "[switchy] obs-config.h not found — build may fail")
-    endif()
-  endif()
-
-  # --- obs-frontend-api ---
   add_library(OBS::obs-frontend-api INTERFACE IMPORTED)
   target_include_directories(OBS::obs-frontend-api INTERFACE
     "${OBS_SOURCE_DIR}/UI/obs-frontend-api"
     "${OBS_SOURCE_DIR}/libobs"
+    "${CMAKE_SOURCE_DIR}/src"
   )
 
+  # Plugin resolves OBS symbols at load time — no link-time OBS libs needed
   set(OBS_SKIP_LINK TRUE)
 
 else()
@@ -61,9 +46,10 @@ if(Qt6_FOUND)
   set(QT_NS Qt6)
 else()
   find_package(Qt5 COMPONENTS Core Widgets QUIET)
-  set(QT_NS $<IF:$<BOOL:${Qt5_FOUND}>,Qt5,"">)
-  if(NOT Qt5_FOUND)
-    message(WARNING "[switchy] Qt not found — skipping UI sources")
+  if(Qt5_FOUND)
+    set(QT_NS Qt5)
+  else()
+    message(WARNING "[switchy] Qt not found — building headless (no UI)")
     set(QT_NS "")
   endif()
 endif()
@@ -75,7 +61,7 @@ if(QT_NS)
 endif()
 
 # ---------------------------------------------------------------------------
-# Plugin target
+# Sources
 # ---------------------------------------------------------------------------
 set(SRCS
   src/plugin-main.cpp
@@ -96,7 +82,7 @@ if(QT_NS)
 endif()
 set_target_properties(obs-auto-cam-switcher PROPERTIES PREFIX "")
 
-# Runtime-link OBS symbols (plugin is loaded by OBS, not linked against it)
+# Runtime-link OBS symbols (resolved at plugin load time by OBS)
 if(OBS_SKIP_LINK)
   if(APPLE)
     target_link_options(obs-auto-cam-switcher PRIVATE -undefined dynamic_lookup)
@@ -109,11 +95,11 @@ endif()
 # Install
 # ---------------------------------------------------------------------------
 if(APPLE)
-  set(_PLUG_DIR "$ENV{HOME}/Library/Application Support/obs-studio/plugins/obs-auto-cam-switcher")
+  set(_PLUG "$ENV{HOME}/Library/Application Support/obs-studio/plugins/obs-auto-cam-switcher")
 elseif(WIN32)
-  set(_PLUG_DIR "$ENV{APPDATA}/obs-studio/plugins/obs-auto-cam-switcher")
+  set(_PLUG "$ENV{APPDATA}/obs-studio/plugins/obs-auto-cam-switcher")
 else()
-  set(_PLUG_DIR "$ENV{HOME}/.config/obs-studio/plugins/obs-auto-cam-switcher")
+  set(_PLUG "$ENV{HOME}/.config/obs-studio/plugins/obs-auto-cam-switcher")
 endif()
-install(TARGETS obs-auto-cam-switcher LIBRARY DESTINATION "${_PLUG_DIR}/bin/64bit")
-install(DIRECTORY data/ DESTINATION "${_PLUG_DIR}/data")
+install(TARGETS obs-auto-cam-switcher LIBRARY DESTINATION "${_PLUG}/bin/64bit")
+install(DIRECTORY data/ DESTINATION "${_PLUG}/data")

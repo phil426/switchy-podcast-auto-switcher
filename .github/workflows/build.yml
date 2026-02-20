@@ -10,14 +10,9 @@ on:
 
 env:
   OBS_VERSION: "30.2.2"
-  OBS_SRC: /tmp/obs-studio
-  OBS_BLD: /tmp/obs-build
 
 jobs:
-  # ── Shared prep: clone OBS + configure (generates obs-config.h) ───────────
-  # Run twice (once per arch runner) — macOS-14 is arm64, macOS-12 is x86_64
-
-  # ── arm64 (Apple Silicon M1/M2/M3) ───────────────────────────────────────
+  # ── Apple Silicon (arm64) ─────────────────────────────────────────────────
   build-arm64:
     name: macOS Apple Silicon (arm64)
     runs-on: macos-14
@@ -27,36 +22,24 @@ jobs:
       - name: Install Qt6
         run: brew install qt@6
 
-      - name: Clone OBS source (shallow)
+      - name: Clone OBS source (headers only — no build needed)
         run: |
           git clone --depth 1 --branch ${{ env.OBS_VERSION }} \
-            https://github.com/obsproject/obs-studio.git ${{ env.OBS_SRC }}
+            https://github.com/obsproject/obs-studio.git /tmp/obs-studio
 
-      - name: Configure OBS (generates obs-config.h, no build)
-        run: |
-          cmake -S ${{ env.OBS_SRC }} -B ${{ env.OBS_BLD }} \
-            -DENABLE_PLUGINS=OFF \
-            -DENABLE_UI=OFF \
-            -DENABLE_SCRIPTING=OFF \
-            -DBUILD_BROWSER=OFF \
-            -DENABLE_WEBSOCKET=OFF 2>&1 | tail -5 || true
-          echo "--- obs-config.h location ---"
-          find ${{ env.OBS_BLD }} -name "obs-config.h" 2>/dev/null || echo "not found"
-
-      - name: Build Switchy (arm64)
+      - name: Configure Switchy
         run: |
           cmake -B build -S . -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
-            -DOBS_SOURCE_DIR=${{ env.OBS_SRC }} \
-            -DOBS_BUILD_DIR=${{ env.OBS_BLD }} \
+            -DOBS_SOURCE_DIR=/tmp/obs-studio \
             -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6)"
-          cmake --build build
-          echo "--- Built libraries ---"
-          find build -name "*.dylib" | head -5
 
-      - name: Create .pkg installer (arm64)
+      - name: Build
+        run: cmake --build build -v
+
+      - name: Create .pkg installer
         run: |
           PLUGIN="$RUNNER_TEMP/stage/Library/Application Support/obs-studio/plugins/obs-auto-cam-switcher"
           mkdir -p "$PLUGIN/bin" "$PLUGIN/data"
@@ -68,7 +51,6 @@ jobs:
             --version 1.0.0 \
             --install-location / \
             Switchy-1.0.0-macos-arm64.pkg
-          echo "✅ pkg created"
 
       - name: Upload arm64 .pkg
         uses: actions/upload-artifact@v4
@@ -76,47 +58,44 @@ jobs:
           name: Switchy-macos-arm64
           path: Switchy-1.0.0-macos-arm64.pkg
 
-  # ── x86_64 (Intel) — used to make the Universal slice ────────────────────
+      - name: Upload arm64 dylib (for Universal step)
+        uses: actions/upload-artifact@v4
+        with:
+          name: switchy-arm64-dylib
+          path: build/*.dylib
+
+  # ── Intel (x86_64) — builds the x86_64 slice for Universal ───────────────
   build-x86_64:
     name: macOS Intel (x86_64)
-    runs-on: macos-12          # macos-12 = Intel runner (macos-13 deprecated free tier)
+    runs-on: macos-12
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Qt6
         run: brew install qt@6
 
-      - name: Clone OBS source (shallow)
+      - name: Clone OBS source
         run: |
           git clone --depth 1 --branch ${{ env.OBS_VERSION }} \
-            https://github.com/obsproject/obs-studio.git ${{ env.OBS_SRC }}
+            https://github.com/obsproject/obs-studio.git /tmp/obs-studio
 
-      - name: Configure OBS (generates obs-config.h)
-        run: |
-          cmake -S ${{ env.OBS_SRC }} -B ${{ env.OBS_BLD }} \
-            -DENABLE_PLUGINS=OFF -DENABLE_UI=OFF \
-            -DENABLE_SCRIPTING=OFF -DBUILD_BROWSER=OFF \
-            -DENABLE_WEBSOCKET=OFF 2>&1 | tail -5 || true
-          find ${{ env.OBS_BLD }} -name "obs-config.h" 2>/dev/null || echo "not found"
-
-      - name: Build Switchy (x86_64)
+      - name: Configure & build Switchy
         run: |
           cmake -B build -S . -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_OSX_ARCHITECTURES=x86_64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
-            -DOBS_SOURCE_DIR=${{ env.OBS_SRC }} \
-            -DOBS_BUILD_DIR=${{ env.OBS_BLD }} \
+            -DOBS_SOURCE_DIR=/tmp/obs-studio \
             -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6)"
-          cmake --build build
+          cmake --build build -v
 
-      - name: Upload x86_64 dylib (for Universal lipo step)
+      - name: Upload x86_64 dylib
         uses: actions/upload-artifact@v4
         with:
           name: switchy-x86_64-dylib
           path: build/*.dylib
 
-  # ── Universal Binary (arm64 + x86_64 via lipo) ───────────────────────────
+  # ── Universal .pkg (lipo arm64 + x86_64) ──────────────────────────────────
   build-universal:
     name: macOS Universal .pkg
     runs-on: macos-14
@@ -127,8 +106,8 @@ jobs:
       - name: Download arm64 dylib
         uses: actions/download-artifact@v4
         with:
-          name: Switchy-macos-arm64
-          path: pkg-arm64
+          name: switchy-arm64-dylib
+          path: dylib-arm64
 
       - name: Download x86_64 dylib
         uses: actions/download-artifact@v4
@@ -136,35 +115,17 @@ jobs:
           name: switchy-x86_64-dylib
           path: dylib-x86_64
 
-      # Re-build arm64 slice for the dylib (pkg artifact has the .pkg, not .dylib)
-      - name: Rebuild arm64 dylib for lipo
-        run: |
-          brew install qt@6
-          git clone --depth 1 --branch ${{ env.OBS_VERSION }} \
-            https://github.com/obsproject/obs-studio.git ${{ env.OBS_SRC }}
-          cmake -S ${{ env.OBS_SRC }} -B ${{ env.OBS_BLD }} \
-            -DENABLE_PLUGINS=OFF -DENABLE_UI=OFF -DENABLE_SCRIPTING=OFF \
-            -DBUILD_BROWSER=OFF -DENABLE_WEBSOCKET=OFF 2>&1 | tail -3 || true
-          cmake -B build_arm64 -S . -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
-            -DOBS_SOURCE_DIR=${{ env.OBS_SRC }} \
-            -DOBS_BUILD_DIR=${{ env.OBS_BLD }} \
-            -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6)"
-          cmake --build build_arm64
-
-      - name: Combine with lipo → Universal dylib
+      - name: Create Universal binary
         run: |
           mkdir -p universal
-          ARM=$(find build_arm64     -name "*.dylib" | head -1)
-          X64=$(find dylib-x86_64   -name "*.dylib" | head -1)
+          ARM=$(find dylib-arm64  -name "*.dylib" | head -1)
+          X64=$(find dylib-x86_64 -name "*.dylib" | head -1)
           echo "arm64 : $ARM"
           echo "x86_64: $X64"
           lipo -create "$ARM" "$X64" -output universal/obs-auto-cam-switcher.dylib
           lipo -info universal/obs-auto-cam-switcher.dylib
 
-      - name: Create Universal .pkg installer
+      - name: Create Universal .pkg
         run: |
           PLUGIN="$RUNNER_TEMP/stage/Library/Application Support/obs-studio/plugins/obs-auto-cam-switcher"
           mkdir -p "$PLUGIN/bin" "$PLUGIN/data"
