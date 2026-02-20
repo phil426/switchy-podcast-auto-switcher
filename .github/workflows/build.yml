@@ -16,7 +16,7 @@ jobs:
   # ── Apple Silicon (arm64) ─────────────────────────────────────────────────
   build-arm64:
     name: macOS Apple Silicon (arm64)
-    runs-on: macos-14   # M1 runner — arm64 natively
+    runs-on: macos-14   # M1 runner
     steps:
       - uses: actions/checkout@v4
 
@@ -65,123 +65,23 @@ jobs:
             --install-location / \
             Switchy-1.0.0-macos-arm64.pkg
 
-      - name: Upload arm64 .pkg
+      - name: Upload .pkg artifact
         uses: actions/upload-artifact@v4
         with:
           name: Switchy-macos-arm64
           path: Switchy-1.0.0-macos-arm64.pkg
 
-      - name: Upload arm64 dylib (for Universal step)
-        uses: actions/upload-artifact@v4
-        with:
-          name: switchy-arm64-dylib
-          path: build/*.dylib
-
-  # ── Intel x86_64 cross-compiled on arm64 runner ───────────────────────────
-  # macOS arm64 runners can cross-compile to x86_64 via -DCMAKE_OSX_ARCHITECTURES.
-  # This avoids deprecated Intel-only runner labels (macos-12 retired Dec 2024).
-  build-x86_64:
-    name: macOS Intel x86_64 (cross-compiled)
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install build tools
-        run: brew install ninja cmake
-
-      - name: Install Qt6 (cached)
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: ${{ env.QT_VERSION }}
-          host: mac
-          target: desktop
-          arch: clang_64
-          cache: true
-
-      - name: Fetch OBS headers (sparse)
-        run: |
-          git clone --depth 1 --filter=blob:none --sparse \
-            --branch ${{ env.OBS_VERSION }} \
-            https://github.com/obsproject/obs-studio.git /tmp/obs-studio
-          cd /tmp/obs-studio
-          git sparse-checkout set libobs UI/obs-frontend-api
-
-      - name: Configure & build Switchy (x86_64 cross-compile)
-        run: |
-          cmake -B build -S . -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_OSX_ARCHITECTURES=x86_64 \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
-            -DOBS_SOURCE_DIR=/tmp/obs-studio \
-            -DCMAKE_PREFIX_PATH="${Qt6_DIR}"
-          cmake --build build -v
-
-      - name: Upload x86_64 dylib
-        uses: actions/upload-artifact@v4
-        with:
-          name: switchy-x86_64-dylib
-          path: build/*.dylib
-
-  # ── Universal .pkg (lipo arm64 + x86_64) ──────────────────────────────────
-  build-universal:
-    name: macOS Universal .pkg
-    runs-on: macos-14
-    needs: [build-arm64, build-x86_64]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download arm64 dylib
-        uses: actions/download-artifact@v4
-        with:
-          name: switchy-arm64-dylib
-          path: dylib-arm64
-
-      - name: Download x86_64 dylib
-        uses: actions/download-artifact@v4
-        with:
-          name: switchy-x86_64-dylib
-          path: dylib-x86_64
-
-      - name: Create Universal binary
-        run: |
-          mkdir -p universal
-          ARM=$(find dylib-arm64  -name "*.dylib" | head -1)
-          X64=$(find dylib-x86_64 -name "*.dylib" | head -1)
-          echo "arm64 : $ARM"
-          echo "x86_64: $X64"
-          lipo -create "$ARM" "$X64" -output universal/obs-auto-cam-switcher.dylib
-          lipo -info universal/obs-auto-cam-switcher.dylib
-
-      - name: Create Universal .pkg
-        run: |
-          PLUGIN="$RUNNER_TEMP/stage/Library/Application Support/obs-studio/plugins/obs-auto-cam-switcher"
-          mkdir -p "$PLUGIN/bin" "$PLUGIN/data"
-          cp universal/obs-auto-cam-switcher.dylib "$PLUGIN/bin/"
-          cp -r data/. "$PLUGIN/data/"
-          pkgbuild \
-            --root "$RUNNER_TEMP/stage" \
-            --identifier com.switchy.obs-auto-cam-switcher \
-            --version 1.0.0 \
-            --install-location / \
-            Switchy-1.0.0-macos-universal.pkg
-
-      - name: Upload Universal .pkg
-        uses: actions/upload-artifact@v4
-        with:
-          name: Switchy-macos-universal
-          path: Switchy-1.0.0-macos-universal.pkg
-
-  # ── Attach .pkg files to GitHub Release ──────────────────────────────────
+  # ── Attach .pkg to GitHub Release ─────────────────────────────────────────
   release-artifacts:
     name: Attach to Release
     runs-on: ubuntu-latest
-    needs: [build-arm64, build-universal]
+    needs: build-arm64
     if: github.event_name == 'release'
     steps:
       - uses: actions/download-artifact@v4
         with:
+          name: Switchy-macos-arm64
           path: installers
-          merge-multiple: true
       - name: List installers
         run: find installers -name "*.pkg" | sort
       - uses: softprops/action-gh-release@v2
