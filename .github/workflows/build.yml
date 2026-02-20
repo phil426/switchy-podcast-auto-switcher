@@ -13,140 +13,325 @@ env:
   OBS_VERSION: "30.2.2"
 
 jobs:
-  # ── macOS ─────────────────────────────────────────────────────────────────
-  build-macos:
-    name: macOS Build
-    runs-on: macos-14
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
 
-      - name: Install OBS Studio (Homebrew)
+  # ── macOS Apple Silicon (arm64) ────────────────────────────────────────────
+  build-macos-arm64:
+    name: macOS Apple Silicon (arm64)
+    runs-on: macos-14          # macos-14 runners are M1 (arm64) natively
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
         run: |
           brew install obs-studio cmake ninja
+          brew install --cask packages          # for .pkg creation
 
-      - name: Configure
+      - name: Configure (arm64)
         run: |
           cmake -B build -S . \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
 
       - name: Build
         run: cmake --build build --config Release
 
-      - name: Package
+      - name: Stage plugin files
         run: |
-          mkdir -p dist/macos
-          cp -r build/*.dylib dist/macos/ 2>/dev/null || true
-          cp -r data dist/macos/
+          STAGE=stage/Library/Application\ Support/obs-studio/plugins/obs-auto-cam-switcher
+          mkdir -p "$STAGE/bin" "$STAGE/data"
+          find build -name "*.dylib" -exec cp {} "$STAGE/bin/" \;
+          cp -r data/. "$STAGE/data/"
 
-      - name: Upload artifact
+      - name: Create .pkg installer
+        run: |
+          pkgbuild \
+            --root stage \
+            --identifier com.switchy.obs-auto-cam-switcher \
+            --version 1.0.0 \
+            --install-location / \
+            Switchy-1.0.0-macos-arm64.pkg
+
+      - name: Upload .pkg artifact
         uses: actions/upload-artifact@v4
         with:
-          name: switchy-macos
-          path: dist/macos
+          name: Switchy-macos-arm64
+          path: Switchy-1.0.0-macos-arm64.pkg
 
-  # ── Windows ───────────────────────────────────────────────────────────────
-  build-windows:
-    name: Windows Build
-    runs-on: windows-latest
+  # ── macOS Intel (x86_64) ──────────────────────────────────────────────────
+  build-macos-x86_64:
+    name: macOS Intel (x86_64)
+    runs-on: macos-13          # macos-13 runners are Intel
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup OBS Studio build environment
-        uses: obsproject/obs-studio/.github/actions/setup-obs@master
-        with:
-          obs-version: ${{ env.OBS_VERSION }}
-        continue-on-error: true
-
-      - name: Install OBS deps (fallback via vcpkg)
-        if: failure()
-        run: |
-          choco install cmake ninja -y
-
-      - name: Configure
-        shell: pwsh
-        run: |
-          cmake -B build -S . `
-            -G "Visual Studio 17 2022" -A x64 `
-            -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build
-        run: cmake --build build --config Release
-
-      - name: Package
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path dist\windows
-          Copy-Item build\Release\*.dll dist\windows\ -ErrorAction SilentlyContinue
-          Copy-Item data dist\windows\ -Recurse
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: switchy-windows
-          path: dist/windows
-
-  # ── Linux (Ubuntu) ────────────────────────────────────────────────────────
-  build-linux:
-    name: Linux Build
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build \
-            libobs-dev obs-studio \
-            qtbase5-dev qt6-base-dev 2>/dev/null || \
-          sudo apt-get install -y cmake ninja-build \
-            libobs-dev obs-studio qtbase5-dev
+        run: brew install obs-studio cmake ninja
 
-      - name: Configure
+      - name: Configure (x86_64)
         run: |
           cmake -B build -S . \
             -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
 
       - name: Build
         run: cmake --build build
 
-      - name: Package
+      - name: Stage & package
         run: |
-          mkdir -p dist/linux
-          cp build/*.so dist/linux/ 2>/dev/null || true
-          cp -r data dist/linux/
+          STAGE=stage/Library/Application\ Support/obs-studio/plugins/obs-auto-cam-switcher
+          mkdir -p "$STAGE/bin" "$STAGE/data"
+          find build -name "*.dylib" -exec cp {} "$STAGE/bin/" \;
+          cp -r data/. "$STAGE/data/"
+          pkgbuild \
+            --root stage \
+            --identifier com.switchy.obs-auto-cam-switcher \
+            --version 1.0.0 \
+            --install-location / \
+            Switchy-1.0.0-macos-x86_64.pkg
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: switchy-linux
-          path: dist/linux
+          name: Switchy-macos-x86_64
+          path: Switchy-1.0.0-macos-x86_64.pkg
 
-  # ── Release: bundle all artifacts ─────────────────────────────────────────
-  release:
-    name: Attach to Release
+  # ── macOS Universal Binary (arm64 + x86_64) ───────────────────────────────
+  build-macos-universal:
+    name: macOS Universal (arm64 + x86_64)
+    runs-on: macos-14
+    needs: [build-macos-arm64, build-macos-x86_64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install obs-studio cmake ninja
+
+      - name: Build arm64 slice
+        run: |
+          cmake -B build_arm64 -S . -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+          cmake --build build_arm64
+
+      - name: Build x86_64 slice
+        run: |
+          cmake -B build_x64 -S . -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+          cmake --build build_x64
+
+      - name: Create Universal binary with lipo
+        run: |
+          ARM_LIB=$(find build_arm64 -name "*.dylib" | head -1)
+          X64_LIB=$(find build_x64  -name "*.dylib" | head -1)
+          mkdir -p universal
+          lipo -create "$ARM_LIB" "$X64_LIB" -output universal/obs-auto-cam-switcher.dylib
+          lipo -info universal/obs-auto-cam-switcher.dylib
+
+      - name: Stage & create Universal .pkg
+        run: |
+          STAGE=stage/Library/Application\ Support/obs-studio/plugins/obs-auto-cam-switcher
+          mkdir -p "$STAGE/bin" "$STAGE/data"
+          cp universal/obs-auto-cam-switcher.dylib "$STAGE/bin/"
+          cp -r data/. "$STAGE/data/"
+          pkgbuild \
+            --root stage \
+            --identifier com.switchy.obs-auto-cam-switcher \
+            --version 1.0.0 \
+            --install-location / \
+            Switchy-1.0.0-macos-universal.pkg
+
+      - name: Upload Universal .pkg
+        uses: actions/upload-artifact@v4
+        with:
+          name: Switchy-macos-universal
+          path: Switchy-1.0.0-macos-universal.pkg
+
+  # ── Windows x64 (64-bit) ──────────────────────────────────────────────────
+  build-windows-x64:
+    name: Windows x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install NSIS (for .exe installer)
+        run: choco install nsis -y
+
+      - name: Configure (x64)
+        run: |
+          cmake -B build -S . -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Stage plugin files
+        shell: pwsh
+        run: |
+          $stage = "stage\obs-auto-cam-switcher"
+          New-Item -ItemType Directory -Force "$stage\bin\64bit"
+          New-Item -ItemType Directory -Force "$stage\data"
+          Copy-Item build\Release\*.dll "$stage\bin\64bit\" -ErrorAction SilentlyContinue
+          Copy-Item data\* "$stage\data\" -Recurse -ErrorAction SilentlyContinue
+
+      - name: Create NSIS installer
+        shell: pwsh
+        run: |
+          $nsiScript = @"
+          !define PRODUCT_NAME "Switchy"
+          !define PRODUCT_VERSION "1.0.0"
+          !define PLUGIN_DIR "\$APPDATA\obs-studio\plugins\obs-auto-cam-switcher"
+
+          Name "Switchy v`${PRODUCT_VERSION}"
+          OutFile "Switchy-1.0.0-windows-x64-installer.exe"
+          InstallDir "C:\Program Files\obs-studio"
+          RequestExecutionLevel admin
+          ShowInstDetails show
+
+          Section "Plugin"
+            SetOutPath "`$APPDATA\obs-studio\plugins\obs-auto-cam-switcher\bin\64bit"
+            File /r "stage\obs-auto-cam-switcher\bin\64bit\*.*"
+            SetOutPath "`$APPDATA\obs-studio\plugins\obs-auto-cam-switcher\data"
+            File /r "stage\obs-auto-cam-switcher\data\*.*"
+          SectionEnd
+
+          Section "Uninstall"
+            RMDir /r "`$APPDATA\obs-studio\plugins\obs-auto-cam-switcher"
+          SectionEnd
+          "@
+          $nsiScript | Out-File -Encoding ASCII installer.nsi
+          & "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
+
+      - name: Upload .exe installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Switchy-windows-x64
+          path: Switchy-1.0.0-windows-x64-installer.exe
+
+      - name: Upload .zip (portable)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Switchy-windows-x64-portable
+          path: stage/
+
+  # ── Windows x86 (32-bit) ──────────────────────────────────────────────────
+  build-windows-x86:
+    name: Windows x86 (32-bit)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install NSIS
+        run: choco install nsis -y
+
+      - name: Configure (Win32)
+        run: |
+          cmake -B build -S . -G "Visual Studio 17 2022" -A Win32 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Stage plugin files
+        shell: pwsh
+        run: |
+          $stage = "stage\obs-auto-cam-switcher"
+          New-Item -ItemType Directory -Force "$stage\bin\32bit"
+          New-Item -ItemType Directory -Force "$stage\data"
+          Copy-Item build\Release\*.dll "$stage\bin\32bit\" -ErrorAction SilentlyContinue
+          Copy-Item data\* "$stage\data\" -Recurse -ErrorAction SilentlyContinue
+
+      - name: Create NSIS installer (x86)
+        shell: pwsh
+        run: |
+          $nsiScript = @"
+          !define PRODUCT_NAME "Switchy"
+          !define PRODUCT_VERSION "1.0.0"
+
+          Name "Switchy v`${PRODUCT_VERSION} (32-bit)"
+          OutFile "Switchy-1.0.0-windows-x86-installer.exe"
+          RequestExecutionLevel admin
+          ShowInstDetails show
+
+          Section "Plugin"
+            SetOutPath "`$APPDATA\obs-studio\plugins\obs-auto-cam-switcher\bin\32bit"
+            File /r "stage\obs-auto-cam-switcher\bin\32bit\*.*"
+            SetOutPath "`$APPDATA\obs-studio\plugins\obs-auto-cam-switcher\data"
+            File /r "stage\obs-auto-cam-switcher\data\*.*"
+          SectionEnd
+
+          Section "Uninstall"
+            RMDir /r "`$APPDATA\obs-studio\plugins\obs-auto-cam-switcher"
+          SectionEnd
+          "@
+          $nsiScript | Out-File -Encoding ASCII installer.nsi
+          & "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
+
+      - name: Upload .exe installer (x86)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Switchy-windows-x86
+          path: Switchy-1.0.0-windows-x86-installer.exe
+
+  # ── Linux Ubuntu 22.04 ────────────────────────────────────────────────────
+  build-linux:
+    name: Linux (Ubuntu 22.04)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libobs-dev obs-studio qtbase5-dev || \
+          sudo apt-get install -y cmake ninja-build libobs-dev obs-studio qt6-base-dev
+
+      - name: Configure
+        run: cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Package (.tar.gz)
+        run: |
+          STAGE=stage/obs-auto-cam-switcher
+          mkdir -p "$STAGE/bin" "$STAGE/data"
+          find build -name "*.so" -exec cp {} "$STAGE/bin/" \;
+          cp -r data/. "$STAGE/data/"
+          tar -czvf Switchy-1.0.0-linux-x86_64.tar.gz -C stage obs-auto-cam-switcher
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Switchy-linux-x86_64
+          path: Switchy-1.0.0-linux-x86_64.tar.gz
+
+  # ── Release: attach all installers ────────────────────────────────────────
+  release-artifacts:
+    name: Attach installers to GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-macos, build-windows, build-linux]
+    needs:
+      - build-macos-universal
+      - build-macos-arm64
+      - build-macos-x86_64
+      - build-windows-x64
+      - build-windows-x86
+      - build-linux
     if: github.event_name == 'release'
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          path: installers
+          merge-multiple: true
 
-      - name: Zip per platform
-        run: |
-          cd artifacts
-          for dir in */; do
-            zip -r "../${dir%/}.zip" "$dir"
-          done
+      - name: List what we have
+        run: find installers -type f | sort
 
-      - name: Upload to GitHub Release
+      - name: Upload all installers to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: "*.zip"
+          files: |
+            installers/*.pkg
+            installers/*.exe
+            installers/*.tar.gz
