@@ -77,10 +77,12 @@ jobs:
           name: switchy-arm64-dylib
           path: build/*.dylib
 
-  # ── Intel (x86_64) — builds the x86_64 slice for Universal ───────────────
+  # ── Intel x86_64 cross-compiled on arm64 runner ───────────────────────────
+  # macOS arm64 runners can cross-compile to x86_64 via -DCMAKE_OSX_ARCHITECTURES.
+  # This avoids deprecated Intel-only runner labels (macos-12 retired Dec 2024).
   build-x86_64:
-    name: macOS Intel (x86_64)
-    runs-on: macos-13   # last Intel runner (macOS 13, not yet retired in this workflow)
+    name: macOS Intel x86_64 (cross-compiled)
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
@@ -104,7 +106,7 @@ jobs:
           cd /tmp/obs-studio
           git sparse-checkout set libobs UI/obs-frontend-api
 
-      - name: Configure & build Switchy
+      - name: Configure & build Switchy (x86_64 cross-compile)
         run: |
           cmake -B build -S . -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
