@@ -1,0 +1,13 @@
+{
+    "name": "switchy-podcast-auto-switcher",
+    "version": "1.0.0",
+    "author": "phil426",
+    "displayName": "Switchy — The Podcast Auto Camera Switcher",
+    "website": "https://github.com/phil426/switchy-podcast-auto-switcher",
+    "uiVersion": 1,
+    "dependencies": {
+        "obs-studio": {
+            "version": ">=30.0.0"
+        }
+    }
+}
