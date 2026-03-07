@@ -1,6 +1,6 @@
-# Podswitch — The Podcast Auto Camera Switcher
+# PodSwitch — The Podcast Auto Camera Switcher
 
-> **Podswitch** automatically switches OBS Studio scenes based on who's speaking — just like the **RØDECaster Video** Auto Switching feature, but for everyone.
+> **PodSwitch** automatically switches OBS Studio scenes based on who's speaking — just like the **RØDECaster Video** Auto Switching feature, but for everyone.
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
 ![OBS Studio 30+](https://img.shields.io/badge/OBS%20Studio-30%2B-blue.svg)
@@ -26,7 +26,7 @@
 
 ## 🎬 How It Works
 
-Every ~10ms, Podswitch:
+Every ~10ms, PodSwitch:
 1. Reads the **RMS audio level** of each mapped microphone
 2. Applies **Exponential Moving Average** smoothing (controlled by Responsiveness)
 3. Adds a **priority bias** (±6 dB) to favour preferred cameras
@@ -40,7 +40,7 @@ Every ~10ms, Podswitch:
 **Dock Panel**
 ```
 ┌─────────────────────────────────┐
-│  🎥 Podswitch             [ON] │
+│  🎥 PodSwitch             [ON] │
 ├─────────────────────────────────┤
 │  Mic 1 ───┤██████░░░░│→ Host   │
 │  Mic 2 ───┤███░░░░░░░│→ Guest  │
@@ -84,7 +84,7 @@ The plugin is auto-installed to your OBS plugins directory.
 
 ## 🎙️ Quick Start
 
-1. Open OBS → find the **Podswitch** dock (View → Docks)
+1. Open OBS → find the **PodSwitch** dock (View → Docks)
 2. Click **⚙ Open Settings**
 3. Add a mapping per speaker:
    - **Audio Source** → microphone
@@ -92,7 +92,7 @@ The plugin is auto-installed to your OBS plugins directory.
    - **Priority** → High for close-ups, Low for wide shot
    - **Threshold** → silence gate (default −40 dB)
 4. Set a **Fallback Scene** (e.g. wide shot)
-5. Hit **● Enable** — Podswitch takes over 🎉
+5. Hit **● Enable** — PodSwitch takes over 🎉
 
 ---
 

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(podswitch VERSION 1.0.0)
+project(PodSwitch VERSION 1.0.0)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -20,7 +20,7 @@ endif()
 
 set(OBS_CONFIG_DIR "/Users/philybarrolaza/Library/Mobile Documents/com~apple~CloudDocs/Projects/Podswitch/.deps/obs-studio-31.1.1/build_universal/config")
 
-message(STATUS "[podswitch] Using dependencies from: ${OBS_SOURCE_DIR}")
+message(STATUS "[PodSwitch] Using dependencies from: ${OBS_SOURCE_DIR}")
 
 add_library(OBS::libobs INTERFACE IMPORTED)
 target_include_directories(OBS::libobs INTERFACE

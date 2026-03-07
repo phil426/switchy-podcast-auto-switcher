@@ -86,7 +86,7 @@ static void on_frontend_event(enum obs_frontend_event event, void *) {
   }
 }
 bool obs_module_load() {
-  blog(LOG_INFO, "[podswitch] Loading Podswitch v1.0.0");
+  blog(LOG_INFO, "[podswitch] Loading PodSwitch v1.0.0");
   g_config = new Config();
   g_engine = new SwitchEngine();
   g_monitor = new AudioMonitor();
@@ -96,7 +96,7 @@ bool obs_module_load() {
   apply_config();
   obs_frontend_add_event_callback(on_frontend_event, nullptr);
   g_dock = new AutoCamDock(g_engine);
-  obs_frontend_add_dock_by_id("podswitch-dock", "Podswitch", g_dock);
+  obs_frontend_add_dock_by_id("podswitch-dock", "PodSwitch", g_dock);
   g_settings_dlg = new SettingsDialog(g_config);
   QObject::connect(g_settings_dlg, &SettingsDialog::settings_applied,
                    [](const Config &) { apply_config(); });
@@ -122,7 +122,5 @@ void obs_module_unload() {
   g_engine = nullptr;
   g_config = nullptr;
 }
-const char *obs_module_name() { return "Podswitch"; }
-const char *obs_module_description() {
-  return "Podcast auto camera switcher.";
-}
+const char *obs_module_name() { return "PodSwitch"; }
+const char *obs_module_description() { return "Podcast auto camera switcher."; }

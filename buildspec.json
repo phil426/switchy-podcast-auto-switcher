@@ -2,7 +2,7 @@
     "name": "podswitch",
     "version": "1.0.0",
     "author": "phil426",
-    "displayName": "Podswitch — The Podcast Auto Camera Switcher",
+    "displayName": "PodSwitch — The Podcast Auto Camera Switcher",
     "website": "https://github.com/phil426/switchy-podcast-auto-switcher",
     "uiVersion": 1,
     "dependencies": {

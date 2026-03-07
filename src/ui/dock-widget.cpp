@@ -5,8 +5,8 @@
 #include <algorithm>
 
 AutoCamDock::AutoCamDock(SwitchEngine *engine, QWidget *parent)
-    : QDockWidget("Podswitch", parent), engine_(engine) {
-  setObjectName("PodswitchDock");
+    : QDockWidget("PodSwitch", parent), engine_(engine) {
+  setObjectName("PodSwitchDock");
   build_ui();
   update_timer_ = new QTimer(this);
   connect(update_timer_, &QTimer::timeout, this,
@@ -57,12 +57,12 @@ void AutoCamDock::build_ui() {
 void AutoCamDock::set_toggle_appearance(bool enabled) {
   toggle_btn_->setChecked(enabled);
   if (enabled) {
-    toggle_btn_->setText("● Podswitch: ON");
+    toggle_btn_->setText("● PodSwitch: ON");
     toggle_btn_->setStyleSheet(
         "QPushButton{background:#2a6e32;color:white;font-weight:bold;padding:"
         "6px;border-radius:4px;}");
   } else {
-    toggle_btn_->setText("○ Podswitch: OFF");
+    toggle_btn_->setText("○ PodSwitch: OFF");
     toggle_btn_->setStyleSheet("QPushButton{background:#444;color:#aaa;font-"
                                "weight:bold;padding:6px;border-radius:4px;}");
   }
