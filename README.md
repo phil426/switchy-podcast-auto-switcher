@@ -67,8 +67,8 @@ Every ~10ms, PodSwitch:
 ## 🚀 Building
 
 ```bash
-git clone https://github.com/phil426/switchy-podcast-auto-switcher.git
-cd switchy-podcast-auto-switcher
+git clone https://github.com/phil426/podswitch.git
+cd podswitch
 
 cmake -B build -S . \
   -DCMAKE_BUILD_TYPE=Release \

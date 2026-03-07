@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "author": "phil426",
     "displayName": "PodSwitch — The Podcast Auto Camera Switcher",
-    "website": "https://github.com/phil426/switchy-podcast-auto-switcher",
+    "website": "https://github.com/phil426/podswitch",
     "uiVersion": 1,
     "dependencies": {
         "obs-studio": {
